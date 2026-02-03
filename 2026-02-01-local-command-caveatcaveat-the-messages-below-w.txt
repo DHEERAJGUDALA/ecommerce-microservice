@@ -1,0 +1,30 @@
+
+╭─── Claude Code v2.1.29 ──────────────────────────────────────────────────────╮
+│                                                    │ Tips for getting        │
+│                    Welcome back!                   │ started                 │
+│                                                    │ √ Run /init to create … │
+│                       ▐▛███▜▌                      │ ─────────────────────── │
+│                      ▝▜█████▛▘                     │ Recent activity         │
+│                        ▘▘ ▝▝                       │ No recent activity      │
+│                                                    │                         │
+│   claude-sonnet-4-5-thinking · API Usage Billing   │                         │
+│         ~\projects\ecommerce-microservice          │                         │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+  /model to try Opus 4.5
+
+> /clear 
+  ⎿  (no content)
+
+> git add . 
+  ⎿ API Error: 400 
+    {"type":"error","error":{"type":"invalid_request_error","message":"You have 
+    exhausted your capacity on claude-sonnet-4-5-thinking. Quota will reset 
+    after 3h23m39s."}}
+
+
+> /compact 
+  ⎿  Error: Error during compaction: Error: API Error: 400
+     {"type":"error","error":{"type":"invalid_request_error","message":"You have
+     exhausted your capacity on claude-sonnet-4-5-thinking. Quota will reset
+     after 3h20m58s."}}
