@@ -67,3 +67,7 @@ temp/
 # Ignore Claude related local files
 .claude/
 CLAUDE.md
+
+.claude/
+
+CLAUDE.md
