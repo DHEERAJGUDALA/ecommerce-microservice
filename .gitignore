@@ -33,3 +33,4 @@ Thumbs.db
 .env
 *.env
 /order-service/src/main/resources/application.properties
+/api-gateway/src/main/resources/application.properties
