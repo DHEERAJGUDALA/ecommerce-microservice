@@ -7,48 +7,42 @@ A production-ready e-commerce microservices platform built with Spring Boot 3 an
 ### High-Level System Architecture
 
 ```mermaid
-graph TD
-    Client((Client App / Web)) -->|HTTP/REST| Gateway[API Gateway :8080]
+flowchart LR
+    Client([Client App / Web]) -.->|REST| Gateway[API Gateway :8080]
     
-    subgraph Infrastructure
-        Eureka[Eureka Server :8761]
-        Config[Config Server :8888]
-        Kafka{{Apache Kafka}}
+    subgraph Core
+        User[User Service] --> DB_User[(PostgreSQL)]
+        Product[Product Service] --> DB_Product[(PostgreSQL)]
+        Product -.-> ES[(Elasticsearch)]
+        Product -.-> Redis[(Redis)]
     end
     
-    Gateway -->|Routes| User[User Service :8083]
-    Gateway -->|Routes| Product[Product Service :8084]
-    Gateway -->|Routes| Order[Order Service :8085]
-    
-    User --> DB_User[(PostgreSQL: user_db)]
-    
-    Product --> DB_Product[(PostgreSQL: product_db)]
-    Product -.->|Sync| ES[(Elasticsearch)]
-    Product -.->|Cache-Aside| Redis[(Redis)]
-    
-    Order --> DB_Order[(PostgreSQL: order_db)]
-    Order -.->|Publishes| Kafka
-    
-    subgraph Saga Participants
-        Payment[Payment Service :8088]
-        Inventory[Inventory Service :8087]
-        Notification[Notification Service :8089]
+    subgraph Saga Orchestration
+        Order[Order Service] --> DB_Order[(PostgreSQL)]
+        Payment[Payment Service] --> DB_Payment[(PostgreSQL)]
+        Inventory[Inventory Service] --> DB_Inventory[(PostgreSQL)]
+        Notify[Notification Service]
     end
     
-    Kafka -.->|Consumes/Publishes| Payment
-    Kafka -.->|Consumes/Publishes| Inventory
-    Kafka -.->|Consumes| Notification
+    Gateway --> User
+    Gateway --> Product
+    Gateway --> Order
     
-    Payment --> DB_Payment[(PostgreSQL: payment_db)]
-    Inventory --> DB_Inventory[(PostgreSQL: inventory_db)]
+    Kafka{{Apache Kafka}}
     
-    classDef infra fill:#f9f,stroke:#333,stroke-width:2px;
-    classDef service fill:#bbf,stroke:#333,stroke-width:2px;
-    classDef db fill:#bfb,stroke:#333,stroke-width:2px;
+    Order -.->|Events| Kafka
+    Payment <.->|Events| Kafka
+    Inventory <.->|Events| Kafka
+    Kafka -.->|Events| Notify
     
-    class Eureka,Config,Kafka infra;
-    class Gateway,User,Product,Order,Payment,Inventory,Notification service;
-    class DB_User,DB_Product,ES,Redis,DB_Order,DB_Payment,DB_Inventory db;
+    classDef default fill:#f9f9f9,stroke:#333,stroke-width:1px;
+    classDef gateway fill:#ff9999,stroke:#333,stroke-width:2px;
+    classDef db fill:#99ccff,stroke:#333,stroke-width:1px;
+    classDef kafka fill:#ffcc99,stroke:#333,stroke-width:2px;
+    
+    class Gateway gateway;
+    class Kafka kafka;
+    class DB_User,DB_Product,DB_Order,DB_Payment,DB_Inventory,ES,Redis db;
 ```
 
 The platform consists of several interconnected microservices, each with a distinct responsibility and isolated database:
@@ -69,39 +63,35 @@ The platform consists of several interconnected microservices, each with a disti
 
 ```mermaid
 sequenceDiagram
-    participant C as Client
-    participant OS as Order Service
-    participant K as Kafka (Topics)
-    participant PS as Payment Service
-    participant IS as Inventory Service
+    participant OS as Order
+    participant K as Kafka
+    participant PS as Payment
+    participant IS as Inventory
     
-    C->>OS: POST /api/orders
-    OS->>OS: Save Order (Status: PENDING)
-    OS->>K: Publish [OrderCreatedEvent]
+    OS->>K: OrderCreated (Status: PENDING)
+    K-->>PS: Consume OrderCreated
+    PS->>PS: Process Payment
     
-    K-->>PS: Consume [OrderCreatedEvent]
-    PS->>PS: Process Payment (Idempotent)
-    
-    alt Payment Success
-        PS->>K: Publish [PaymentCompletedEvent]
-        K-->>OS: Consume (Status -> PAYMENT_COMPLETED)
-        K-->>IS: Consume [PaymentCompletedEvent]
+    alt Success
+        PS->>K: PaymentCompleted
+        K-->>OS: Status -> PAYMENT_COMPLETED
+        K-->>IS: Consume PaymentCompleted
         
-        IS->>IS: Reserve Stock (Optimistic Lock)
+        IS->>IS: Reserve Stock
         
         alt Stock Available
-            IS->>K: Publish [InventoryReservedEvent]
-            K-->>OS: Consume (Status -> CONFIRMED)
+            IS->>K: InventoryReserved
+            K-->>OS: Status -> CONFIRMED
         else Out of Stock
-            IS->>K: Publish [InventoryFailedEvent]
-            K-->>OS: Consume (Status -> CANCELLED)
-            K-->>PS: Consume [InventoryFailedEvent]
-            PS->>PS: COMPENSATING TX: Process Refund
+            IS->>K: InventoryFailed
+            K-->>OS: Status -> CANCELLED
+            K-->>PS: Consume InventoryFailed
+            PS->>PS: Refund (Compensating Tx)
         end
         
-    else Payment Failed
-        PS->>K: Publish [PaymentFailedEvent]
-        K-->>OS: Consume (Status -> CANCELLED)
+    else Failed
+        PS->>K: PaymentFailed
+        K-->>OS: Status -> CANCELLED
     end
 ```
 
