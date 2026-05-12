@@ -4,6 +4,53 @@ A production-ready e-commerce microservices platform built with Spring Boot 3 an
 
 ## Architecture & Services
 
+### High-Level System Architecture
+
+```mermaid
+graph TD
+    Client((Client App / Web)) -->|HTTP/REST| Gateway[API Gateway :8080]
+    
+    subgraph Infrastructure
+        Eureka[Eureka Server :8761]
+        Config[Config Server :8888]
+        Kafka{{Apache Kafka}}
+    end
+    
+    Gateway -->|Routes| User[User Service :8083]
+    Gateway -->|Routes| Product[Product Service :8084]
+    Gateway -->|Routes| Order[Order Service :8085]
+    
+    User --> DB_User[(PostgreSQL: user_db)]
+    
+    Product --> DB_Product[(PostgreSQL: product_db)]
+    Product -.->|Sync| ES[(Elasticsearch)]
+    Product -.->|Cache-Aside| Redis[(Redis)]
+    
+    Order --> DB_Order[(PostgreSQL: order_db)]
+    Order -.->|Publishes| Kafka
+    
+    subgraph Saga Participants
+        Payment[Payment Service :8088]
+        Inventory[Inventory Service :8087]
+        Notification[Notification Service :8089]
+    end
+    
+    Kafka -.->|Consumes/Publishes| Payment
+    Kafka -.->|Consumes/Publishes| Inventory
+    Kafka -.->|Consumes| Notification
+    
+    Payment --> DB_Payment[(PostgreSQL: payment_db)]
+    Inventory --> DB_Inventory[(PostgreSQL: inventory_db)]
+    
+    classDef infra fill:#f9f,stroke:#333,stroke-width:2px;
+    classDef service fill:#bbf,stroke:#333,stroke-width:2px;
+    classDef db fill:#bfb,stroke:#333,stroke-width:2px;
+    
+    class Eureka,Config,Kafka infra;
+    class Gateway,User,Product,Order,Payment,Inventory,Notification service;
+    class DB_User,DB_Product,ES,Redis,DB_Order,DB_Payment,DB_Inventory db;
+```
+
 The platform consists of several interconnected microservices, each with a distinct responsibility and isolated database:
 
 *   **API Gateway** (`port: 8080`): Spring Cloud Gateway acting as the single entry point. Handles routing and cross-cutting concerns.
@@ -19,6 +66,45 @@ The platform consists of several interconnected microservices, each with a disti
 ## Key Design Patterns & Technical Highlights
 
 ### 1. Saga Orchestration (Distributed Transactions)
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant OS as Order Service
+    participant K as Kafka (Topics)
+    participant PS as Payment Service
+    participant IS as Inventory Service
+    
+    C->>OS: POST /api/orders
+    OS->>OS: Save Order (Status: PENDING)
+    OS->>K: Publish [OrderCreatedEvent]
+    
+    K-->>PS: Consume [OrderCreatedEvent]
+    PS->>PS: Process Payment (Idempotent)
+    
+    alt Payment Success
+        PS->>K: Publish [PaymentCompletedEvent]
+        K-->>OS: Consume (Status -> PAYMENT_COMPLETED)
+        K-->>IS: Consume [PaymentCompletedEvent]
+        
+        IS->>IS: Reserve Stock (Optimistic Lock)
+        
+        alt Stock Available
+            IS->>K: Publish [InventoryReservedEvent]
+            K-->>OS: Consume (Status -> CONFIRMED)
+        else Out of Stock
+            IS->>K: Publish [InventoryFailedEvent]
+            K-->>OS: Consume (Status -> CANCELLED)
+            K-->>PS: Consume [InventoryFailedEvent]
+            PS->>PS: COMPENSATING TX: Process Refund
+        end
+        
+    else Payment Failed
+        PS->>K: Publish [PaymentFailedEvent]
+        K-->>OS: Consume (Status -> CANCELLED)
+    end
+```
+
 Implemented a choreography-based Saga to maintain data consistency across `order-service`, `payment-service`, and `inventory-service` without distributed locks (2PC).
 *   **Messaging**: Apache Kafka (`acks=all`, `enable.idempotence=true`).
 *   **Compensating Transactions**: Automatic refunds are issued if inventory reservation fails after payment succeeds.
